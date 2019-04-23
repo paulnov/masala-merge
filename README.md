@@ -107,7 +107,7 @@ fuzziness(real): Default is 1. Higher numbers generate merges with more
 	   fuzziness.
 
 quietly: Suppress output
-
+ 
 keepusing(string): Works like keepusing() in standard merge command
 
 sortwords: Will sort words before running merge
