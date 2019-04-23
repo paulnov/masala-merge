@@ -1,262 +1,26 @@
 qui {
 
 /**********************************************************************************/
-/* program masala_merge : Fuzzy match using masalafied levenshtein                   */
-/*stata presumably starts with two files, with an identifier and a string to match.
-e.g. state_dist_id bank_village_name
-     state_dist_id pc01_village_name 
-
-
-current method.
+/* program masala_merge : Fuzzy match using masalafied levenshtein                */
+/*
+Meta-algorithm:
 1. stata outsheets two files, with an id and a name column.
-2. python gets filenames from command lines, reads two files into two dictionaries.
-2a. add max distance to python command line
+2. python gets filenames and parameters from command lines, reads two files into two dictionaries
 3. python outputs a single file, with id, str1, str2, distance
-4. stata reads this file and processes
+4. stata reads this file and processes, makes decisions about which matches to keep
 
-can wrap 1, 4 in a stata calling function. this seems like a good approach.
-
-
-VERSION HISTORY
-- 2013/09/16: renames text1, text2 -> varname_master, varname_using
+See readme.md for sample usage.
 
 */
 /***********************************************************************************/
 cap prog drop masala_merge
 prog def masala_merge
 {
-  syntax varlist using/, S1(string) OUTfile(string) [DIST(integer 5)]
-  disp_nice "THIS IS OBSOLETE, YOU SHOULD BE USING masala_merge2, WHICH IS SMARTER AND FRIENDLIER"
-
-  /* require tmp and masala_dir folders to be set */
-  if mi("$tmp") | mi("$MASALA_DIR") {
-      disp as error "Need to set globals 'tmp' and 'MASALA_DIR' to use this program"
-      exit
-  }
-  // masala_merge state_id district_id using /tmp/pn/foo.dta, S1(village_name) OUTfile(string) [DIST(integer 5)]
-
-  /* make everything quiet until python gets called -- it's not helpful */
-  qui {
-
-    /* store master filename */
-    local master $S_FN
-    
-    /* create temporary files to be used */
-  
-    /* create a random 4 digit number to make the temp files unique */
-    local nonce = floor(uniform() * 10000)
-    
-    local src1 $tmp/src1_`nonce'.txt
-    local src2 $tmp/src2_`nonce'.txt
-    local out $tmp/out_`nonce'.txt
-    local lev_groups $tmp/lev_groups_`nonce'.dta
-    
-    preserve
-    
-    keep `varlist' `s1'
-    sort `varlist' `s1'
-    
-    /* merge two datasets on ids to produce group names */
-    merge m:m `varlist' using `using', keepusing(`varlist' `s1')
-    
-    // generate id groups
-    egen g = group(`varlist')
-    drop if mi(g)
-    
-    qui sum g
-    local num_groups = r(max)
-            
-    // save group list
-    keep g `varlist'
-    duplicates drop
-    save "`lev_groups'", replace
-    
-    /* now prepare group 1 */
-    restore
-    preserve
-    
-    keep `varlist' `s1'
-  
-    /* drop if missing string and store # observations */
-    keep if !mi(`s1')
-    qui count
-    local g1_count = r(N)
-    
-    /* bring in group identifiers */
-    merge m:1 `varlist' using "`lev_groups'", keepusing(g)
-  
-    /* places with missing ids won't match group */
-    drop if _merge == 1
-  
-    /* only keep matches */
-    keep if _merge == 3
-    duplicates drop
-    
-    // outsheet string group 1
-    outsheet g `s1' using "`src1'", comma replace nonames
-    
-    // prepare group2
-    di "opening `using'..."
-    use `using', clear
-    keep `varlist' `s1'
-  
-    /* drop if missing string and store # observations */
-    keep if !mi(`s1')
-    qui count
-    local g2_count = r(N)
-    
-    // merge in group identifiers
-    merge m:1 `varlist' using "`lev_groups'", keepusing(g)
-    
-    /* something wrong if didn't match group ids for any observation */
-    drop if _merge == 1
-  
-    /* only keep matches */
-    keep if _merge == 3
-    duplicates drop
-    
-    // outsheet string group 2
-    outsheet g `s1' using "`src2'", comma replace nonames
-  }
-  
-  // call python levenshtein program
-  di "Matching `g1_count' strings to `g2_count' strings in `num_groups' groups."
-  di "Calling lev.py:"
-
-  di `" shell python -u $MASALA_DIR/lev.py -d `dist' -1 "`src1'" -2 "`src2'" -o "`out'" "'
-  !python $MASALA_DIR/lev.py -d `dist' -1 "`src1'" -2 "`src2'" -o "`out'"
-
-  di "lev.py finished."
-
-  /* quietly process the python output */
-  qui {
-    /* open output lev dataset */
-    /* take care, this generates an error if zero matches */
-    capture insheet using "`out'", comma nonames clear
-  
-    /* if there are zero matches, create an empty outfile and we're done */
-    if _rc {
-      disp_nice "WARNING: masala_merge: There were no matches. Empty output file will be saved."
-      clear
-      save `outfile', replace emptyok
-      exit
-    }
-    ren v1 g
-    ren v2 `s1'_master
-    ren v3 `s1'_using
-    ren v4 lev_dist
-  
-    /* merge group identifiers back in */
-    destring g, replace
-    merge m:1 g using "`lev_groups'", keepusing(`varlist')
-    
-    /* _m == 1 would imply that our match list has groups not in the initial set */
-    assert _merge != 1
-  
-    /* _m == 2 are groups with zero matches. drop them */
-    drop if _merge == 2
-  
-    /* count specificity of each match */
-    bys g `s1'_master: egen master_matches = count(g)
-    bys g `s1'_using: egen using_matches = count(g)
-  
-    /* count distance to second best match */
-  
-    /* calculate best match for each var */
-    foreach v in master using {
-      bys g `s1'_`v': egen `v'_dist_rank = rank(lev_dist), unique
-      
-      gen tmp = lev_dist if `v'_dist_rank == 1
-      bys g `s1'_`v': egen `v'_dist_best = max(tmp)
-      drop tmp
-      gen tmp = lev_dist if `v'_dist_rank == 2
-      bys g `s1'_`v': egen `v'_dist_second = max(tmp)
-      drop tmp
-      
-      drop `v'_dist_rank
-    }
-    
-    drop g _m
-  
-  
-    /* apply optimal matching rule (from pc9101 data in ~/iecmerge/include/calibrate_fuzzy.do) */
-    /* initialize */
-    gen keep_master = 1
-    gen keep_using = 1
-  
-    /* get mean length of matched string */
-    gen length = floor(0.5 * (length(`s1'_master) + length(`s1'_using)))
-  
-    /* 1. drop matches with too high a levenshtein distance (threshold is a function of length) */
-    replace keep_master = 0 if lev_dist > 0.9 & length <= 4
-    replace keep_master = 0 if lev_dist > 1.0 & length <= 5
-    replace keep_master = 0 if lev_dist > 1.3 & length <= 8
-    replace keep_master = 0 if lev_dist > 1.4 & inrange(length, 9, 14)
-    replace keep_master = 0 if lev_dist > 1.8 & inrange(length, 15, 17)
-    replace keep_master = 0 if lev_dist > 2.1
-    
-    /* copy these thresholds to keep_using */
-    replace keep_using = 0 if keep_master == 0
-  
-    /* 2. never use a match that is not the best match */
-    replace keep_master = 0 if (lev_dist > master_dist_best) & !mi(lev_dist)
-    replace keep_using = 0 if (lev_dist > using_dist_best) & !mi(lev_dist)
-    
-    /* 3. apply best empirical safety margin rule */
-    replace keep_master = 0 if (master_dist_second - master_dist_best) < (0.4 + 0.25 * lev_dist)
-    replace keep_using = 0 if (using_dist_second - using_dist_best) < (0.4 + 0.25 * lev_dist)
-  
-    /* save over output file */
-    order `varlist' `s1'_master `s1'_using lev_dist keep_master keep_using master_* using_*
-    save `outfile', replace
-  }
-
-  /* report conclusions. */
-  di "Merged text fields saved in Stata file `outfile', and called `s1'_master and `s1'_using"
-  disp_nice "WHAT DO DO NEXT"
-  di ". use `outfile'"
-  di ". masala_review `varlist', s1(`s1') master(`master') using(`using')"
-  di "       (or use masala_process, which does the same thing quietly)"
-  restore
-}
-end
-/* *********** END program masala_merge ***************************************** */
-
-/**********************************************************************************/
-/* program masala_merge2 : Fuzzy match using masalafied levenshtein                   */
-/*stata presumably starts with two files, with an identifier and a string to match.
-e.g. state_dist_id bank_village_name
-     state_dist_id pc01_village_name 
-
-
-current method.
-1. stata outsheets two files, with an id and a name column.
-2. python gets filenames from command lines, reads two files into two dictionaries.
-2a. add max distance to python command line
-3. python outputs a single file, with id, str1, str2, distance
-4. stata reads this file and processes
-
-can wrap 1, 4 in a stata calling function. this seems like a good approach.
-
-
-VERSION HISTORY
-- 2013/09/16: renames text1, text2 -> varname_master, varname_using
-
-*/
-/***********************************************************************************/
-cap prog drop masala_merge2
-prog def masala_merge2
-{
-
-
-  /* NOTE THAT THE DIST() PARAMETER IS FOR BACKWARD COMPATIBILITY AND IS NOT USED. */
   syntax [varlist] using/, S1(string) OUTfile(string) [FUZZINESS(real 1.0) quietly KEEPUSING(passthru) SORTWORDS] 
 
-  // masala_merge2 state_id district_id using /tmp/pn/foo.dta, S1(village_name) OUTfile(string) [DIST(integer 5)]
-
   /* require tmp and masala_dir folders to be set */
-  if mi("$tmp") | mi("$MASALA_DIR") {
-      disp as error "Need to set globals 'tmp' and 'MASALA_DIR' to use this program"
+  if mi("$tmp") | mi("$MASALA_PATH") {
+      disp as error "Need to set globals 'tmp' and 'MASALA_PATH' to use this program"
       exit
   }
 
@@ -265,13 +29,12 @@ prog def masala_merge2
     local sortwords "-s"
   }
   
-  /* define maximum distance for lev.py as 0.4 + 1.25 * (largest acceptable match).
+  /* define maximum distance for lev.py as 0.35 + 1.25 * (largest acceptable match).
      This is the threshold limit, i.e. if we accept a match at 2.1, we'll reject it
-        if there's another match at 0.4 + 2.1*1.25. (this is hardcoded below)
-     (then i switched it from 0.4 to 0.35 so default max dist is 3 and not higher */
+        if there's another match at 0.4 + 2.1*1.25. (this is hardcoded below) */
   local max_dist = 0.40 + 1.25 * 2.1 * `fuzziness'
   
-  /* make everything quiet until python gets called -- it's not helpful */
+  /* make everything quiet until python gets called -- this output is not helpful */
   qui {
 
     /* create temporary file to store original dataset */
@@ -369,8 +132,8 @@ prog def masala_merge2
   di "Matching `g1_count' strings to `g2_count' strings in `num_groups' groups."
   di "Calling lev.py:"
 
-  di `" shell python -u $MASALA_DIR/lev.py -d `max_dist' -1 "`src1'" -2 "`src2'" -o "`out'" `sortwords'"'
-  !python               $MASALA_DIR/lev.py -d `max_dist' -1 "`src1'" -2 "`src2'" -o "`out'" `sortwords'
+  di `" shell python -u $MASALA_PATH/lev.py -d `max_dist' -1 "`src1'" -2 "`src2'" -o "`out'" `sortwords'"'
+  !python               $MASALA_PATH/lev.py -d `max_dist' -1 "`src1'" -2 "`src2'" -o "`out'" `sortwords'
 
   di "lev.py finished."
 
@@ -382,7 +145,7 @@ prog def masala_merge2
   
     /* if there are zero matches, create an empty outfile and we're done */
     if _rc {
-      disp_nice "WARNING: masala_merge2: There were no matches. Empty output file will be saved."
+      disp_nice "WARNING: masala_merge: There were no matches. Empty output file will be saved."
       clear
       save `outfile', replace emptyok
       exit
@@ -424,7 +187,7 @@ prog def masala_merge2
     
     drop g _m
   
-    /* apply optimal matching rule (from 1991-2001 pop census confirmed village matches in calibrate_fuzzy.do) */
+    /* apply optimal matching rule (based on 1991-2001 pop census confirmed village matches in calibrate_fuzzy.do) */
     /* initialize */
     gen keep_master = 1
     gen keep_using = 1
@@ -460,12 +223,12 @@ prog def masala_merge2
   /* run masala_review */
   use `outfile', clear
   
-  /* if quietly is not specified, use masala_review */
+  /* if quietly is not specified, call masala_review, which calls masala_process */
   if mi("`quietly'") {
     masala_review `varlist', s1(`s1') master(`master') using(`using')
   }
 
-  /* if quietly was specified, use masala_process */
+  /* if quietly is specified, go directly to masala_process */
   else {
     masala_process `varlist', s1(`s1') master(`master') using(`using')
   }
@@ -475,7 +238,7 @@ prog def masala_merge2
   di " Complete set of fuzzy matches is here: `outfile'"
 }
 end
-/* *********** END program masala_merge2 ***************************************** */
+/* *********** END program masala_merge ***************************************** */
 
 /**********************************************************************************/
 /* program masala_lev_dist : Calculate levenshtein distance between two vars */
@@ -502,7 +265,7 @@ prog def masala_lev_dist
 
   /* call external python program */
   di "Calling lev.py..."
-  shell python $MASALA_DIR/lev.py -1 $tmp/masala_in.csv -o $tmp/masala_out.csv
+  shell python $MASALA_PATH/lev.py -1 $tmp/masala_in.csv -o $tmp/masala_out.csv
 
   /* convert created file to stata format */
   preserve
@@ -551,7 +314,7 @@ where target is universal naming syntax in keys, and state_name_fm / district_na
 cap prog drop fix_spelling
 prog def fix_spelling
 {
-  syntax varname(min=1 max=1), SRCfile(string) [GEN(name) GROUP(varlist) TARGETfield(string) TARGETGROUP(string) keepall replace]
+  syntax varname(min=1 max=1), SRCfile(string) [GEN(name) GROUP(varlist) TARGETfield(string) TARGETGROUP(string) keepall replace FUZZINESS(real 2)]
 
   /* put variable fix spelling in `varname' because we need arg "`1'" open */
   tokenize `varlist'
@@ -647,7 +410,7 @@ prog def fix_spelling
     tempfile spelling_errors
 
     /* otherwise, go to the fuzzy merge */
-    masala_merge2 `group' using `SPELLING_MASTER_LIST', s1(`varname') outfile(`spelling_errors') dist(4)
+    masala_merge `group' using `SPELLING_MASTER_LIST', s1(`varname') outfile(`spelling_errors') fuzziness(`fuzziness')
 
     /* set tempfile for spelling corrections */
     tempfile SPELLING_CORRECTIONS
@@ -776,7 +539,7 @@ prog def masala_review
   qui count if _masala_merge < 3 & _ntag in 1/`limit'
   if `r(N)' {
     disp_nice "This is a sorted list of some places that did not match. Review for ideas on how to improve"
-    // list `varlist' `s1' _masala_merge if _masala_merge < 3 & _ntag in 1/`limit', sepby(`varlist')
+    list `varlist' `s1' _masala_merge if _masala_merge < 3 & _ntag in 1/`limit', sepby(`varlist')
   }
 
   drop _ntag _matched
@@ -880,13 +643,6 @@ prog def review_merge
   tokenize "`varlist'"
   if !mi("`2'") {
     local sepby sepby(`1')
-
-    // this turned out to overly separate when we had a lot of merge terms
-    // while !mi("`2'") {
-    //   local sepby `sepby' `1'
-    //   mac shift
-    // }
-    // local sepby sepby(`sepby')
   }
 
   /* only show each posisble match once */
@@ -1005,7 +761,7 @@ end
 /* program synonym_fix : Replace strings for names that have multiple variants but one main version, */
 /*                       using a externally-supplied dictionary                                      */
 /*                       i.e. uttaranchal -> uttarakhand                                             */
-/* external file has the following columns:
+  /* external file has the following columns:
       "master"             : the target name
       "pc01_district_name" : variable that we are replacing
       "`group'"            : a list of variables that define the context in which to match the name
@@ -1154,4 +910,17 @@ prog def synonym_fix
   }
 end
 /* *********** END program synonym_fix ***************************************** */
+
+/********************************************************/
+/* program masala_merge2 : Placeholder for masala_merge */
+/********************************************************/
+cap prog drop masala_merge2
+prog def masala_merge2
+{
+  syntax [varlist] using, S1(passthru) OUTfile(passthru) [FUZZINESS(passthru) quietly(passthru) KEEPUSING(passthru) SORTWORDS(passthru)] 
+  masala_merge `varlist' `using', `s1' `outfile' `fuzziness' `quietly' `keepusing' `sortwords' `quietly'
 }
+end
+/* *********** END program masala_merge2 ***************************************** */
+}
+

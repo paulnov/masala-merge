@@ -123,7 +123,7 @@ pair_2to2 = set(['EV', 'EO', 'CK', 'KC', 'KQ', 'QK', 'PF', 'FP', 'GJ', 'JG', 'BV
 pair_2to1_list = ['O-OW', 'U-UW', 'U-OO', 'E-IY', 'I-IY', 'X-KS', 'E-EE' , 'O-OO', 'S-SC' , 'X-XC', 'I-EE', 'A-YA']
 
 # dictionary for cheap single letter omissions. spaces are free, but non-zero to avoid duplication problems.
-pair_1to0 = {'A':0.2, 'H':0.2, 'N':0.45, ' ': 0.01 }
+pair_1to0 = {'A':0.2, 'H':0.2, 'N':0.45, ' ': 0.01, '(': 0.01, ')': 0.01 }
 
 cost_swap = 0.45
 cost_1to1 = 0.45
