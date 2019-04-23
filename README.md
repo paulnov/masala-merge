@@ -3,11 +3,11 @@ Stata/Python code for fuzzy matching of latin script location names in Hindi.
 
 # Requirements
 
-Python 3.2 (may work with other versions)
+- Python 3.2 (may work with other versions)
 
-`$tmp` and `$MASALA_PATH` must be defined. `$tmp` is a folder for
-storage of temporary files. `$MASALA_PATH` is the path containing
-`lev.py`, included in this package.
+- `$tmp` and `$MASALA_PATH` must be defined. `$tmp` is a folder for
+  storage of temporary files. `$MASALA_PATH` is the path containing
+  `lev.py`, included in this package.
 
 # Stata usage (fix_spelling)
 
@@ -36,6 +36,9 @@ Additional options:
   variable have different names in the master dataset.
 - If `keepall` is specified, your dataset will add rows from the
   target list that didn't match anything in your data
+- `fuzziness(real)`: Default is 2. Higher numbers generate merges with more
+           tolerance for differences. Even 0 allows some
+	   fuzziness.
 
 Example:
 
@@ -127,3 +130,13 @@ The low cost character changes are described in a list in `lev.py`. If
 you would like to modify this for other languages with other common
 spelling inconsistencies, you only need to modify these lists and the
 costs associated with each kind of change.
+
+# Usage tips
+
+- For best performance, lowercase all text and eliminate special
+  characters before running, as these will trigger unnecessary edit
+  costs. Whitespace is given a cost of 0.01.
+
+- If you create a set of character lists to use this in a different
+  language, please let me know so I can link to your list here.
+  
