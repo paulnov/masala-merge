@@ -469,7 +469,7 @@ prog def fix_spelling
     /* show replacements made */
     tempvar tag
     qui egen `tag' = tag(`varname') if !mi(`gen') & `gen' != `varname'
-    disp_nice "Spelling fixes and levenshtein distances:"
+    disp_nice "Spelling fixes and Masala-Levenshtein distances:"
     list `varname' `gen' `gen'_dist if `tag'
     
     /* replace original var, show what was done, and drop the distance */
