@@ -9,6 +9,8 @@ Python 3.2 (may work with other versions)
 storage of temporary files. `$MASALA_PATH` is the path containing
 `lev.py`, included in this package.
 
+Also Make sure that all the paths have no spaces in them. This causes errors since stata calls system commands with file path as arguments without using quotes.
+
 # Stata usage (fix_spelling)
 
 `fix_spelling` will magically correct spelling errors in a list of
