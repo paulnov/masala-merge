@@ -1,6 +1,9 @@
 # masala-merge
 Stata/Python code for fuzzy matching of latin script location names in Hindi.
 
+# This is not the latest version of masala-merge
+This project is being maintained here: https://github.com/devdatalab/masala-merge
+
 # Requirements
 
 Python 3.2 (may work with other versions)
